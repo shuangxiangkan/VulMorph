@@ -1,0 +1,23 @@
+{
+  "pattern_id": "INT_OVERFLOW_ALLOC_001",
+  "name": "integer overflow before allocation",
+  "derived_from_seeds": [
+    "seed-001"
+  ],
+  "vulnerability_class": "",
+  "source": "",
+  "transform": [],
+  "sink": "",
+  "missing_constraints": [],
+  "patch_added_constraints": [],
+  "negative_evidence": [],
+  "cwe": [],
+  "target_library_hints": {
+    "function_keywords": [],
+    "api_keywords": [],
+    "sink_keywords": [],
+    "type_keywords": []
+  },
+  "candidate_scoring_notes": "",
+  "known_limitations": ""
+}

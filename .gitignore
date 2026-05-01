@@ -1,0 +1,5 @@
+data/targets/*
+!data/targets/README.md
+.venv/
+__pycache__/
+*.pyc
