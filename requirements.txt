@@ -1,2 +1,5 @@
 langgraph>=0.2.0
 urllib3<2
+sentence-transformers>=2.7.0
+transformers>=4.41.0,<5
+httpx>=0.25.2

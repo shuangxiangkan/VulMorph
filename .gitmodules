@@ -1,0 +1,3 @@
+[submodule "CCScope"]
+	path = CCScope
+	url = https://github.com/shuangxiangkan/CCScope.git

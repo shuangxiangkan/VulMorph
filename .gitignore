@@ -1,5 +1,8 @@
-data/targets/*
-!data/targets/README.md
+data/**
+!data/
+!data/**/
+!data/**/.gitkeep
+.env
 .venv/
 __pycache__/
 *.pyc
