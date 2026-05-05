@@ -31,7 +31,7 @@ def main() -> None:
         default=int(os.environ.get("VULMORPH_EMBEDDING_BATCH_SIZE", "4")),
     )
     parser.add_argument("--force-pull", action="store_true")
-    parser.add_argument("--llm", choices=["none", "deepseek"], default="none")
+    parser.add_argument("--llm", choices=["none", "deepseek"], default="deepseek")
     parser.add_argument("--json", action="store_true", help="Print the full LangGraph state as JSON.")
     args = parser.parse_args()
 

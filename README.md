@@ -130,8 +130,11 @@ Example with cJSON:
 
 ```bash
 source .venv/bin/activate
-python -m vulmorph.cli https://github.com/DaveGamble/cJSON.git --llm deepseek --force-pull
+python -m vulmorph.cli https://github.com/DaveGamble/cJSON.git
 ```
+
+LLM structure analysis is enabled by default with DeepSeek. Use `--llm none`
+to run the deterministic heuristic path without model calls.
 
 The CLI prints per-node progress while running, including periodic embedding
 progress such as `10/250`, and outputs a short text summary at the end. Use
