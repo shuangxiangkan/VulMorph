@@ -22,6 +22,50 @@ acquire_repo
 -> embed_functions
 ```
 
+## Project Structure
+
+```text
+VulMorph/
+  vulmorph/               Pipeline source code
+  prompts/                LLM prompt templates
+  CCScope/                Git submodule for C/C++ codebase analysis
+  data/                   Local runtime outputs, ignored by git
+    targets/              Cloned target repositories
+    embeddings/           Function embedding JSONL files
+  .env.example            Environment variable template
+  requirements.txt        Python dependencies for the root project
+```
+
+Python modules:
+
+- `vulmorph/__init__.py`: package entry point with lazy graph import.
+- `vulmorph/state.py`: shared LangGraph state type definitions.
+- `vulmorph/graph.py`: assembles the LangGraph pipeline and progress callback
+  wrapper.
+- `vulmorph/cli.py`: command-line interface, progress printing, and final run
+  summary formatting.
+- `vulmorph/repos.py`: clones remote repositories or reuses an existing local
+  repository path.
+- `vulmorph/repo_analysis.py`: summarizes repository layout and optionally asks
+  an LLM to analyze the structure.
+- `vulmorph/source_scope.py`: selects the library source files that should be
+  analyzed, filtering out tests, fuzzers, examples, docs, and build artifacts.
+- `vulmorph/build_setup.py`: prepares `compile_commands.json`, currently with
+  automatic CMake support.
+- `vulmorph/function_extraction.py`: uses CCScope and clangd to extract
+  function-like symbols from the selected source scope.
+- `vulmorph/embeddings.py`: embeds extracted functions with the local Jina code
+  embedding model and writes repo-specific JSONL output.
+- `vulmorph/llm_clients.py`: LLM client integrations, currently DeepSeek's
+  OpenAI-compatible chat completion API.
+
+Prompt templates:
+
+- `prompts/repo_structure_system.txt`: system prompt for repository structure
+  analysis.
+- `prompts/repo_structure_user.txt`: user prompt for repository structure
+  analysis. It uses `{payload}` as the repository summary placeholder.
+
 ## Setup
 
 Clone with submodules:

@@ -8,6 +8,8 @@ from typing import Any
 
 import httpx
 
+PROMPT_DIR = Path(__file__).resolve().parents[1] / "prompts"
+
 
 class DeepSeekRepoStructureClient:
     """Small OpenAI-compatible client for repository structure analysis."""
@@ -15,8 +17,8 @@ class DeepSeekRepoStructureClient:
     def __init__(
         self,
         api_key: str,
-        model: str = "deepseek-v4-flash",
-        base_url: str = "https://api.deepseek.com",
+        model: str,
+        base_url: str,
         timeout: float = 60.0,
     ) -> None:
         self.api_key = api_key
@@ -27,32 +29,23 @@ class DeepSeekRepoStructureClient:
     @classmethod
     def from_env(cls) -> "DeepSeekRepoStructureClient":
         load_env_file()
-        api_key = os.environ.get("DEEPSEEK_API_KEY", "")
-        if not api_key:
-            raise RuntimeError("DEEPSEEK_API_KEY is not set")
         return cls(
-            api_key=api_key,
-            model=os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash"),
-            base_url=os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+            api_key=_required_env("DEEPSEEK_API_KEY"),
+            model=_required_env("DEEPSEEK_MODEL"),
+            base_url=_required_env("DEEPSEEK_BASE_URL"),
         )
 
     def analyze_repo_structure(self, payload: dict[str, Any]) -> dict[str, Any]:
+        system_prompt = _load_prompt("repo_structure_system.txt")
+        user_prompt = _load_prompt("repo_structure_user.txt").replace("{payload}", str(payload))
         messages = [
             {
                 "role": "system",
-                "content": (
-                    "You analyze C/C++ repositories for a vulnerability research pipeline. "
-                    "Return concise structured JSON only."
-                ),
+                "content": system_prompt,
             },
             {
                 "role": "user",
-                "content": (
-                    "Analyze this repository structure. Identify likely project purpose, "
-                    "build system, important source directories, test directories, and any "
-                    "notes relevant to later function extraction.\n\n"
-                    f"{payload}"
-                ),
+                "content": user_prompt,
             },
         ]
         response = httpx.post(
@@ -94,3 +87,14 @@ def load_env_file(path: str | Path = ".env") -> None:
         key = key.strip()
         value = value.strip().strip('"').strip("'")
         os.environ.setdefault(key, value)
+
+
+def _load_prompt(filename: str) -> str:
+    return (PROMPT_DIR / filename).read_text(encoding="utf-8").strip()
+
+
+def _required_env(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise RuntimeError(f"{name} is not set")
+    return value

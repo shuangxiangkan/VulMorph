@@ -1,0 +1,22 @@
+Analyze this repository structure.
+
+Identify:
+- likely project purpose
+- build system
+- library source files or directories
+- test directories
+- fuzzing directories
+- examples or documentation directories
+- notes relevant to later function extraction
+
+Return JSON with these fields when possible:
+- purpose
+- build_system
+- library_source_files
+- library_source_dirs
+- exclude_dirs
+- reason
+
+Repository structure summary:
+
+{payload}
