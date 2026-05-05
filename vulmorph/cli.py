@@ -32,6 +32,11 @@ def main() -> None:
     )
     parser.add_argument("--force-pull", action="store_true")
     parser.add_argument("--llm", choices=["none", "deepseek"], default="deepseek")
+    parser.add_argument("--bug-fix-max-commits", type=int, default=20)
+    parser.add_argument("--bug-fix-max-snippets", type=int, default=100)
+    parser.add_argument("--bug-fix-top-k", type=int, default=10)
+    parser.add_argument("--bug-fix-commit-filter", choices=["llm", "keyword"], default="llm")
+    parser.add_argument("--bug-fix-llm-batch-size", type=int, default=100)
     parser.add_argument("--json", action="store_true", help="Print the full LangGraph state as JSON.")
     args = parser.parse_args()
 
@@ -43,11 +48,16 @@ def main() -> None:
         embedding_output_dir=args.embedding_output_dir,
         embedding_batch_size=args.embedding_batch_size,
         force_pull=args.force_pull,
+        bug_fix_max_commits=args.bug_fix_max_commits,
+        bug_fix_max_snippets=args.bug_fix_max_snippets,
+        bug_fix_top_k=args.bug_fix_top_k,
+        bug_fix_commit_filter=args.bug_fix_commit_filter,
+        bug_fix_llm_batch_size=args.bug_fix_llm_batch_size,
         llm_client=llm_client,
         progress_callback=_print_progress,
     )
     if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(json.dumps(_json_safe_result(result), ensure_ascii=False, indent=2))
     else:
         print(_format_summary(result))
 
@@ -103,6 +113,17 @@ def _node_detail(payload: dict[str, Any] | None) -> str:
     if "embedding_progress" in payload:
         progress = payload["embedding_progress"]
         return f"{progress.get('completed', 0)}/{progress.get('total', 0)}"
+    if "bug_fix_commits" in payload:
+        commits = payload["bug_fix_commits"]
+        return f"commits={commits.get('count', 0)}, mode={commits.get('filter_mode')}"
+    if "bug_fix_snippets" in payload:
+        snippets = payload["bug_fix_snippets"]
+        return f"snippets={snippets.get('count', 0)}, output={snippets.get('output_path', '')}"
+    if "similarity_result" in payload:
+        result = payload["similarity_result"]
+        if result.get("ok") is False:
+            return ", ".join(result.get("errors", []))
+        return f"matches={result.get('count', 0)}, output={result.get('output_path', '')}"
     return ""
 
 
@@ -113,6 +134,9 @@ def _summarize_result(result: dict[str, Any]) -> dict[str, Any]:
     build = result.get("build_setup", {})
     extraction = result.get("function_extraction", {})
     embedding = result.get("embedding_result", {})
+    commits = result.get("bug_fix_commits", {})
+    snippets = result.get("bug_fix_snippets", {})
+    similarity = result.get("similarity_result", {})
 
     return {
         "ok": not result.get("errors"),
@@ -149,6 +173,23 @@ def _summarize_result(result: dict[str, Any]) -> dict[str, Any]:
                 "output_path": embedding.get("output_path"),
                 "batch_size": embedding.get("batch_size"),
             },
+            "bug_fix_commits": {
+                "ok": commits.get("ok"),
+                "count": commits.get("count"),
+                "filter_mode": commits.get("filter_mode"),
+                "llm_errors": commits.get("llm_errors", []),
+            },
+            "bug_fix_snippets": {
+                "ok": snippets.get("ok"),
+                "count": snippets.get("count"),
+                "output_path": snippets.get("output_path"),
+            },
+            "similarity": {
+                "ok": similarity.get("ok"),
+                "count": similarity.get("count"),
+                "output_path": similarity.get("output_path"),
+                "top_matches": similarity.get("items", [])[:5],
+            },
         },
         "errors": result.get("errors", []),
     }
@@ -183,12 +224,36 @@ def _format_summary(result: dict[str, Any]) -> str:
                 f"batch_size={steps['embeddings'].get('batch_size')}"
             ),
             f"Embedding output: {steps['embeddings'].get('output_path')}",
+            (
+                "Bug-fix commits found: "
+                f"{steps['bug_fix_commits'].get('count')} "
+                f"(mode={steps['bug_fix_commits'].get('filter_mode')})"
+            ),
+            f"Bug-fix snippets extracted: {steps['bug_fix_snippets'].get('count')}",
+            f"Bug-fix snippets output: {steps['bug_fix_snippets'].get('output_path')}",
+            f"Similarity matches: {steps['similarity'].get('count')}",
+            f"Similarity output: {steps['similarity'].get('output_path')}",
         ]
     )
+    if steps["similarity"].get("top_matches"):
+        lines.append("Top similar matches:")
+        for item in steps["similarity"]["top_matches"]:
+            bug_fix = item.get("bug_fix", {})
+            function = item.get("function", {})
+            lines.append(
+                "  - "
+                f"{item.get('similarity', 0):.4f} "
+                f"{bug_fix.get('commit', '')[:12]} {bug_fix.get('file', '')} "
+                f"-> {function.get('name')} ({function.get('file')})"
+            )
     if summary["errors"]:
         lines.append("Errors:")
         lines.extend(f"  - {error}" for error in summary["errors"])
     return "\n".join(lines)
+
+
+def _json_safe_result(result: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in result.items() if not key.startswith("_")}
 
 
 if __name__ == "__main__":

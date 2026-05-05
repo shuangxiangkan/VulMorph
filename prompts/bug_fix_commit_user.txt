@@ -1,0 +1,28 @@
+Classify which commits are likely bug fixes or security fixes.
+
+Treat a commit as relevant if it appears to fix incorrect behavior, crashes,
+memory safety issues, parsing edge cases, invalid input handling, integer or
+buffer issues, null dereferences, fuzz-found failures, or security
+vulnerabilities.
+
+Do not require explicit words like "bug" or "fix"; infer from the commit
+subject when possible. Exclude purely cosmetic, documentation-only, formatting,
+release, CI, dependency, or build-system-only changes.
+
+Return JSON with this shape:
+
+{
+  "items": [
+    {
+      "commit": "<hash>",
+      "is_bug_fix": true,
+      "confidence": 0.0,
+      "reason": "...",
+      "category": "security|crash|memory-safety|input-validation|logic-bug|other"
+    }
+  ]
+}
+
+Commits:
+
+{payload}

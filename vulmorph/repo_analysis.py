@@ -20,6 +20,9 @@ EXCLUDED_DIRS = {
     "__pycache__",
 }
 
+NATIVE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"}
+TREE_DEPTH = 3
+
 
 class LLMClient(Protocol):
     def analyze_repo_structure(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -50,10 +53,14 @@ def analyze_repo_structure(state: dict[str, Any], llm_client: LLMClient | None =
     }
 
 
-def build_structure_summary(root: Path, file_limit: int = 500) -> dict[str, Any]:
+def build_structure_summary(root: Path, file_limit: int = 1000) -> dict[str, Any]:
     files: list[dict[str, Any]] = []
+    native_files: list[dict[str, Any]] = []
     suffixes: Counter[str] = Counter()
     top_dirs: Counter[str] = Counter()
+    directory_counts: Counter[str] = Counter()
+    native_directory_counts: Counter[str] = Counter()
+    tree_entries: set[str] = set()
 
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [
@@ -64,8 +71,20 @@ def build_structure_summary(root: Path, file_limit: int = 500) -> dict[str, Any]
             path = Path(dirpath) / filename
             relative = path.relative_to(root).as_posix()
             suffix = path.suffix.lower() or "<none>"
+            parts = Path(relative).parts
             suffixes[suffix] += 1
             top_dirs[relative.split("/", 1)[0] if "/" in relative else "."] += 1
+            for depth in range(1, min(len(parts), TREE_DEPTH) + 1):
+                prefix = "/".join(parts[:depth])
+                if depth < len(parts):
+                    tree_entries.add(prefix + "/")
+            directory = str(Path(relative).parent)
+            if directory == ".":
+                directory = "."
+            directory_counts[directory] += 1
+            if suffix in NATIVE_SUFFIXES:
+                native_directory_counts[directory] += 1
+                native_files.append({"path": relative, "suffix": suffix, "size": path.stat().st_size})
             if len(files) < file_limit:
                 files.append(
                     {
@@ -79,6 +98,15 @@ def build_structure_summary(root: Path, file_limit: int = 500) -> dict[str, Any]
         "file_count_sampled": len(files),
         "suffix_counts": dict(suffixes.most_common(30)),
         "top_level_counts": dict(top_dirs.most_common(30)),
+        "directory_tree_depth": TREE_DEPTH,
+        "directory_tree": sorted(tree_entries)[:1000],
+        "directory_counts": dict(directory_counts.most_common(100)),
+        "native_directory_counts": dict(native_directory_counts.most_common(100)),
+        "native_files": native_files,
+        "candidate_native_dirs": [
+            {"path": path, "native_file_count": count}
+            for path, count in native_directory_counts.most_common(30)
+        ],
         "files": files,
     }
 

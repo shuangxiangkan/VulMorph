@@ -13,4 +13,7 @@ class VulMorphState(TypedDict, total=False):
     build_setup: dict[str, Any]
     function_extraction: dict[str, Any]
     embedding_result: dict[str, Any]
+    bug_fix_commits: dict[str, Any]
+    bug_fix_snippets: dict[str, Any]
+    similarity_result: dict[str, Any]
     errors: list[str]

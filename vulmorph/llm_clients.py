@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -36,7 +37,7 @@ class DeepSeekRepoStructureClient:
         )
 
     def analyze_repo_structure(self, payload: dict[str, Any]) -> dict[str, Any]:
-        system_prompt = _load_prompt("repo_structure_system.txt")
+        system_prompt = _load_prompt("json_system.txt")
         user_prompt = _load_prompt("repo_structure_user.txt").replace("{payload}", str(payload))
         messages = [
             {
@@ -71,6 +72,41 @@ class DeepSeekRepoStructureClient:
             "content": content,
             "raw_usage": data.get("usage", {}),
         }
+
+    def classify_bug_fix_commits(self, commits: list[dict[str, Any]]) -> dict[str, Any]:
+        system_prompt = _load_prompt("json_system.txt")
+        user_prompt = _load_prompt("bug_fix_commit_user.txt").replace(
+            "{payload}",
+            json.dumps(commits, ensure_ascii=False, indent=2),
+        )
+        data = self._chat_json(system_prompt, user_prompt)
+        return {
+            "provider": "deepseek",
+            "model": self.model,
+            "content": data["choices"][0]["message"]["content"],
+            "raw_usage": data.get("usage", {}),
+        }
+
+    def _chat_json(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
+        response = httpx.post(
+            f"{self.base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0,
+                "response_format": {"type": "json_object"},
+            },
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        return response.json()
 
 
 def load_env_file(path: str | Path = ".env") -> None:

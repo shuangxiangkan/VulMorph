@@ -27,6 +27,14 @@ DEFAULT_EXCLUDED_PARTS = {
     "docs",
     "benchmark",
     "benchmarks",
+    "build-aux",
+    "extra",
+    "external",
+    "gnulib",
+    "third_party",
+    "tools",
+    "vendor",
+    "windows",
 }
 
 
@@ -41,7 +49,8 @@ def select_source_scope(state: dict[str, Any]) -> dict[str, Any]:
         return _failure(state, "structure analysis failed; cannot select source scope")
 
     root = Path(repo_result["path"])
-    summary_files = structure.get("summary", {}).get("files", [])
+    summary = structure.get("summary", {})
+    summary_files = summary.get("native_files") or summary.get("files", [])
     llm_scope = _scope_from_llm(structure.get("llm"))
     candidates = _native_files(summary_files)
 
