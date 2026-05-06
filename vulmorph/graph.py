@@ -13,6 +13,7 @@ from .embeddings import embed_functions
 from .function_extraction import extract_functions_with_ccscope
 from .repo_analysis import LLMClient, analyze_repo_structure
 from .repos import acquire_repo
+from .risk_assessment import assess_similar_bug_risk
 from .source_scope import select_source_scope
 from .state import VulMorphState
 from .similarity import search_similar_bug_fix_code
@@ -64,6 +65,10 @@ def build_vulmorph_graph(
         "search_similar_bug_fix_code",
         _with_progress("search_similar_bug_fix_code", search_similar_bug_fix_code, progress_callback),
     )
+    graph.add_node(
+        "assess_similar_bug_risk",
+        _with_progress("assess_similar_bug_risk", assess_similar_bug_risk, progress_callback),
+    )
 
     graph.add_edge(START, "acquire_repo")
     graph.add_edge("acquire_repo", "analyze_repo_structure")
@@ -74,7 +79,8 @@ def build_vulmorph_graph(
     graph.add_edge("embed_functions", "find_bug_fix_commits")
     graph.add_edge("find_bug_fix_commits", "extract_bug_fix_snippets")
     graph.add_edge("extract_bug_fix_snippets", "search_similar_bug_fix_code")
-    graph.add_edge("search_similar_bug_fix_code", END)
+    graph.add_edge("search_similar_bug_fix_code", "assess_similar_bug_risk")
+    graph.add_edge("assess_similar_bug_risk", END)
     return graph.compile()
 
 
@@ -82,9 +88,10 @@ def run_vulmorph_pipeline(repo_url: str, **kwargs: Any) -> VulMorphState:
     """Convenience runner for scripts and notebooks."""
 
     llm_client = kwargs.pop("llm_client", None)
+    progress_callback = kwargs.pop("progress_callback", None)
     app = build_vulmorph_graph(
         llm_client=llm_client,
-        progress_callback=kwargs.pop("progress_callback", None),
+        progress_callback=progress_callback,
     )
     initial_state: VulMorphState = {
         "repo_request": {
@@ -92,7 +99,6 @@ def run_vulmorph_pipeline(repo_url: str, **kwargs: Any) -> VulMorphState:
             **kwargs,
         }
     }
-    progress_callback = kwargs.get("progress_callback")
     if progress_callback is not None:
         initial_state["_progress_callback"] = progress_callback
     if llm_client is not None:

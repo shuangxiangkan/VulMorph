@@ -16,4 +16,7 @@ class VulMorphState(TypedDict, total=False):
     bug_fix_commits: dict[str, Any]
     bug_fix_snippets: dict[str, Any]
     similarity_result: dict[str, Any]
+    risk_assessment_result: dict[str, Any]
     errors: list[str]
+    _llm_client: Any
+    _progress_callback: Any

@@ -83,8 +83,14 @@ def find_bug_fix_commits(state: dict[str, Any]) -> dict[str, Any]:
             }
         )
     llm_client = state.get("_llm_client")
+    progress_callback = state.get("_progress_callback")
     if mode == "llm" and llm_client is not None:
-        candidates, llm_errors = _llm_filter_commits(commits, llm_client, batch_size)
+        candidates, llm_errors = _llm_filter_commits(
+            commits,
+            llm_client,
+            batch_size,
+            progress_callback,
+        )
         filter_mode = "llm"
     else:
         candidates = [item for item in commits if item["score"] > 0]
@@ -160,12 +166,25 @@ def _llm_filter_commits(
     commits: list[dict[str, Any]],
     llm_client: Any,
     batch_size: int,
+    progress_callback: Any = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     by_hash = {item["commit"]: item for item in commits}
     selected: list[dict[str, Any]] = []
     errors: list[str] = []
     for start in range(0, len(commits), batch_size):
         batch = commits[start:start + batch_size]
+        if callable(progress_callback):
+            progress_callback(
+                "find_bug_fix_commits",
+                "progress",
+                {
+                    "bug_fix_commit_progress": {
+                        "completed": start,
+                        "total": len(commits),
+                        "batch_size": batch_size,
+                    }
+                },
+            )
         payload = [
             {
                 "commit": item["commit"],
@@ -196,6 +215,18 @@ def _llm_filter_commits(
             )
             selected.append(base)
 
+    if callable(progress_callback):
+        progress_callback(
+            "find_bug_fix_commits",
+            "progress",
+            {
+                "bug_fix_commit_progress": {
+                    "completed": len(commits),
+                    "total": len(commits),
+                    "batch_size": batch_size,
+                }
+            },
+        )
     if not selected and errors:
         selected = [item for item in commits if item["score"] > 0]
     return selected, errors

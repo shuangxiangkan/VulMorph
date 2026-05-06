@@ -68,6 +68,8 @@ def main() -> None:
     parser.add_argument("--bug-fix-top-k", type=int, default=10)
     parser.add_argument("--bug-fix-commit-filter", choices=["llm", "keyword"], default="llm")
     parser.add_argument("--bug-fix-llm-batch-size", type=int, default=100)
+    parser.add_argument("--bug-risk-max-cases", type=int, default=10)
+    parser.add_argument("--bug-risk-max-code-chars", type=int, default=6000)
     parser.add_argument("--json", action="store_true", help="Print the full LangGraph state as JSON.")
     args = parser.parse_args()
 
@@ -91,6 +93,8 @@ def main() -> None:
         bug_fix_top_k=args.bug_fix_top_k,
         bug_fix_commit_filter=args.bug_fix_commit_filter,
         bug_fix_llm_batch_size=args.bug_fix_llm_batch_size,
+        bug_risk_max_cases=args.bug_risk_max_cases,
+        bug_risk_max_code_chars=args.bug_risk_max_code_chars,
         llm_client=llm_client,
         progress_callback=_print_progress,
     )
@@ -176,6 +180,9 @@ def _node_detail(payload: dict[str, Any] | None) -> str:
     if "bug_fix_commits" in payload:
         commits = payload["bug_fix_commits"]
         return f"commits={commits.get('count', 0)}, mode={commits.get('filter_mode')}"
+    if "bug_fix_commit_progress" in payload:
+        progress = payload["bug_fix_commit_progress"]
+        return f"{progress.get('completed', 0)}/{progress.get('total', 0)}"
     if "bug_fix_snippets" in payload:
         snippets = payload["bug_fix_snippets"]
         return f"snippets={snippets.get('count', 0)}, output={snippets.get('output_path', '')}"
@@ -184,6 +191,13 @@ def _node_detail(payload: dict[str, Any] | None) -> str:
         if result.get("ok") is False:
             return ", ".join(result.get("errors", []))
         return f"matches={result.get('count', 0)}, output={result.get('output_path', '')}"
+    if "risk_assessment_result" in payload:
+        result = payload["risk_assessment_result"]
+        if result.get("ok") is False:
+            return ", ".join(result.get("errors", []))
+        if result.get("skipped"):
+            return f"skipped={result.get('reason')}"
+        return f"cases={result.get('count', 0)}, output={result.get('output_path', '')}"
     return ""
 
 
@@ -197,6 +211,7 @@ def _summarize_result(result: dict[str, Any]) -> dict[str, Any]:
     commits = result.get("bug_fix_commits", {})
     snippets = result.get("bug_fix_snippets", {})
     similarity = result.get("similarity_result", {})
+    risk = result.get("risk_assessment_result", {})
 
     return {
         "ok": not result.get("errors"),
@@ -252,6 +267,12 @@ def _summarize_result(result: dict[str, Any]) -> dict[str, Any]:
                 "output_path": similarity.get("output_path"),
                 "top_matches": similarity.get("items", [])[:5],
             },
+            "risk_assessment": {
+                "ok": risk.get("ok"),
+                "count": risk.get("count"),
+                "output_path": risk.get("output_path"),
+                "top_findings": risk.get("items", [])[:5],
+            },
         },
         "errors": result.get("errors", []),
     }
@@ -296,6 +317,8 @@ def _format_summary(result: dict[str, Any]) -> str:
             f"Bug-fix snippets output: {steps['bug_fix_snippets'].get('output_path')}",
             f"Similarity matches: {steps['similarity'].get('count')}",
             f"Similarity output: {steps['similarity'].get('output_path')}",
+            f"Risk assessment cases: {steps['risk_assessment'].get('count')}",
+            f"Risk assessment output: {steps['risk_assessment'].get('output_path')}",
         ]
     )
     if steps["similarity"].get("top_matches"):
@@ -308,6 +331,18 @@ def _format_summary(result: dict[str, Any]) -> str:
                 f"{item.get('similarity', 0):.4f} "
                 f"{bug_fix.get('commit', '')[:12]} {bug_fix.get('file', '')} "
                 f"-> {function.get('name')} ({function.get('file')})"
+            )
+    if steps["risk_assessment"].get("top_findings"):
+        lines.append("Top risk assessments:")
+        for item in steps["risk_assessment"]["top_findings"]:
+            assessment = item.get("assessment", {})
+            function = item.get("function", {})
+            risk = assessment.get("risk", "unknown")
+            confidence = assessment.get("confidence", 0)
+            lines.append(
+                "  - "
+                f"{risk} ({confidence}) "
+                f"{function.get('name')} ({function.get('file')})"
             )
     if summary["errors"]:
         lines.append("Errors:")

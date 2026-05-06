@@ -15,6 +15,8 @@ vulnerability-pattern extraction. The current MVP focuses on the first stages:
    and extract native-code patch snippets.
 8. Compare bug-fix snippets with current function embeddings and rank the most
    similar functions.
+9. Ask the configured LLM to compare historical vulnerable code, fixed code,
+   and similar current functions to judge whether a related bug may remain.
 
 ## Current Graph
 
@@ -28,6 +30,7 @@ acquire_repo
 -> find_bug_fix_commits
 -> extract_bug_fix_snippets
 -> search_similar_bug_fix_code
+-> assess_similar_bug_risk
 ```
 
 ## Project Structure
@@ -42,6 +45,7 @@ VulMorph/
     embeddings/           Function embedding JSONL files
     bugfixes/             Historical bug-fix patch snippets
     similarity/           Bug-fix/function similarity results
+    risk/                 LLM assessments of similar-code bug risk
   .env.example            Environment variable template
   requirements.txt        Python dependencies for the root project
 ```
@@ -73,6 +77,8 @@ Python modules:
   those commits.
 - `vulmorph/similarity.py`: embeds bug-fix snippets and ranks current functions
   by cosine similarity against those snippets.
+- `vulmorph/risk_assessment.py`: sends historical vulnerable/fixed snippets
+  and similar current functions to the configured LLM for bug-risk judgment.
 - `vulmorph/llm_clients.py`: LLM client integrations, currently DeepSeek's
   OpenAI-compatible chat completion API.
 
@@ -145,7 +151,11 @@ Required fields:
 ```env
 DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=
-DEEPSEEK_MODEL=
+DEEPSEEK_MODEL=deepseek-v4-pro
+DEEPSEEK_COMMIT_FILTER_MODEL=deepseek-v4-flash
+DEEPSEEK_RISK_MODEL=deepseek-v4-pro
+DEEPSEEK_TIMEOUT=
+DEEPSEEK_MAX_RETRIES=
 
 VULMORPH_EMBEDDING_PROVIDER=
 VULMORPH_EMBEDDING_API_KEY=
@@ -172,6 +182,12 @@ python -m vulmorph.cli https://github.com/DaveGamble/cJSON.git
 
 LLM structure analysis is enabled by default with DeepSeek. Use `--llm none`
 to run the deterministic heuristic path without model calls.
+
+DeepSeek model usage can be split by task. `DEEPSEEK_MODEL` is the default
+model for general analysis, `DEEPSEEK_COMMIT_FILTER_MODEL` is used for
+historical commit classification, and `DEEPSEEK_RISK_MODEL` is used for the
+final similar-bug risk assessment. A practical setup is flash for commit
+filtering and pro for risk judgment.
 
 The CLI prints per-node progress while running, including periodic embedding
 progress such as `10/250`, and outputs a short text summary at the end. Use
@@ -212,6 +228,11 @@ processes git log entries in batches. Use `--bug-fix-commit-filter keyword` to
 fall back to keyword-only filtering, or `--bug-fix-llm-batch-size` to tune the
 batch size.
 
+After similarity search, VulMorph sends the historical vulnerable code, the
+fixed code, and similar current functions to the configured LLM. Use
+`--bug-risk-max-cases` to control how many similar matches are assessed and
+`--bug-risk-max-code-chars` to cap each code excerpt.
+
 Outputs are written under `data/`, which is ignored by git. Function embeddings
 are written to:
 
@@ -224,6 +245,7 @@ Historical bug-fix snippets and similarity results are written to:
 ```text
 data/bugfixes/<repo-name>.bugfix_snippets.jsonl
 data/similarity/<repo-name>.bugfix_similarity.json
+data/risk/<repo-name>.bug_risk_assessment.json
 ```
 
 ## Notes
