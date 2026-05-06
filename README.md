@@ -85,7 +85,21 @@ Prompt templates:
 
 ## Setup
 
-Clone with submodules:
+System dependencies must be installed before creating the virtual environment
+or running the pipeline. Use the helper script in the repository root first:
+
+```bash
+chmod +x install_system_deps.sh
+./install_system_deps.sh
+```
+
+The script installs the required system dependencies:
+
+- `cmake`
+- `clangd`
+- `bear` or `intercept-build`
+
+Clone with submodules after the system dependencies are ready:
 
 ```bash
 git clone --recurse-submodules <repo-url>
@@ -112,14 +126,7 @@ CCScope requires `clangd >= 18` and a compilation database. For CMake projects,
 VulMorph can generate `compile_commands.json` automatically with `cmake`.
 For Autotools projects, VulMorph detects `configure.ac`, `Makefile.am`, or
 `autogen.sh`, then uses `bear -- make` or `intercept-build make` to capture
-`compile_commands.json`.
-
-On Ubuntu:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y cmake clangd-18 bear autoconf automake libtool make
-```
+`compile_commands.json`. Make sure these system tools are installed first.
 
 ## Environment
 

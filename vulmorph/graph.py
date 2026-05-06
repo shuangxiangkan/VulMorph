@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Optional
 
 from langgraph.graph import END, START, StateGraph
 
@@ -17,7 +17,7 @@ from .source_scope import select_source_scope
 from .state import VulMorphState
 from .similarity import search_similar_bug_fix_code
 
-ProgressCallback = Callable[[str, str, dict[str, Any] | None], None]
+ProgressCallback = Callable[[str, str, Optional[dict[str, Any]]], None]
 
 
 def build_vulmorph_graph(

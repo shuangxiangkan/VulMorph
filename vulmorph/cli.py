@@ -28,7 +28,7 @@ def main() -> None:
     parser.add_argument(
         "--embedding-batch-size",
         type=int,
-        default=int(os.environ.get("VULMORPH_EMBEDDING_BATCH_SIZE", "4")),
+        default=_env_int("VULMORPH_EMBEDDING_BATCH_SIZE", 4),
     )
     parser.add_argument("--force-pull", action="store_true")
     parser.add_argument("--llm", choices=["none", "deepseek"], default="deepseek")
@@ -60,6 +60,16 @@ def main() -> None:
         print(json.dumps(_json_safe_result(result), ensure_ascii=False, indent=2))
     else:
         print(_format_summary(result))
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
 
 
 def _print_progress(node_name: str, event: str, payload: dict[str, Any] | None) -> None:
