@@ -18,8 +18,39 @@ def main() -> None:
     parser.add_argument("repo_url", help="Git repository URL to analyze")
     parser.add_argument("--target-dir", default="data/targets")
     parser.add_argument(
+        "--embedding-provider",
+        choices=["local", "api"],
+        default=os.environ.get("VULMORPH_EMBEDDING_PROVIDER", "local"),
+    )
+    parser.add_argument(
         "--embedding-model-path",
         default=os.environ.get("VULMORPH_EMBEDDING_MODEL_PATH", ""),
+    )
+    parser.add_argument(
+        "--embedding-base-url",
+        default=os.environ.get("VULMORPH_EMBEDDING_BASE_URL", ""),
+    )
+    parser.add_argument(
+        "--embedding-api-key",
+        default=os.environ.get("VULMORPH_EMBEDDING_API_KEY", ""),
+    )
+    parser.add_argument(
+        "--embedding-model",
+        default=os.environ.get("VULMORPH_EMBEDDING_MODEL", ""),
+    )
+    parser.add_argument(
+        "--embedding-dimensions",
+        default=os.environ.get("VULMORPH_EMBEDDING_DIMENSIONS", ""),
+    )
+    parser.add_argument(
+        "--embedding-timeout",
+        type=float,
+        default=_env_float("VULMORPH_EMBEDDING_TIMEOUT", 120.0),
+    )
+    parser.add_argument(
+        "--embedding-max-input-chars",
+        type=int,
+        default=_env_int("VULMORPH_EMBEDDING_MAX_INPUT_CHARS", 12000),
     )
     parser.add_argument(
         "--embedding-output-dir",
@@ -44,7 +75,14 @@ def main() -> None:
     result = run_vulmorph_pipeline(
         args.repo_url,
         target_dir=args.target_dir,
+        embedding_provider=args.embedding_provider,
         embedding_model_path=args.embedding_model_path,
+        embedding_base_url=args.embedding_base_url,
+        embedding_api_key=args.embedding_api_key,
+        embedding_model=args.embedding_model,
+        embedding_dimensions=args.embedding_dimensions,
+        embedding_timeout=args.embedding_timeout,
+        embedding_max_input_chars=args.embedding_max_input_chars,
         embedding_output_dir=args.embedding_output_dir,
         embedding_batch_size=args.embedding_batch_size,
         force_pull=args.force_pull,
@@ -68,6 +106,16 @@ def _env_int(name: str, default: int) -> int:
         return default
     try:
         return int(value)
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return default
+    try:
+        return float(value)
     except ValueError:
         return default
 
@@ -105,6 +153,8 @@ def _node_detail(payload: dict[str, Any] | None) -> str:
         return repo.get("path", "") or ", ".join(repo.get("errors", []))
     if "structure_analysis" in payload:
         analysis = payload["structure_analysis"]
+        if analysis.get("llm_errors"):
+            return f"used_llm={analysis.get('used_llm', False)}, llm_error={analysis['llm_errors'][0]}"
         return f"used_llm={analysis.get('used_llm', False)}"
     if "source_scope" in payload:
         scope = payload["source_scope"]
@@ -178,6 +228,8 @@ def _summarize_result(result: dict[str, Any]) -> dict[str, Any]:
             },
             "embeddings": {
                 "ok": embedding.get("ok"),
+                "provider": embedding.get("provider"),
+                "model": embedding.get("model"),
                 "count": embedding.get("count"),
                 "dimension": embedding.get("dimension"),
                 "output_path": embedding.get("output_path"),
@@ -231,7 +283,8 @@ def _format_summary(result: dict[str, Any]) -> str:
                 "Embeddings: "
                 f"{steps['embeddings'].get('count')} vectors, "
                 f"dim={steps['embeddings'].get('dimension')}, "
-                f"batch_size={steps['embeddings'].get('batch_size')}"
+                f"batch_size={steps['embeddings'].get('batch_size')}, "
+                f"provider={steps['embeddings'].get('provider')}"
             ),
             f"Embedding output: {steps['embeddings'].get('output_path')}",
             (

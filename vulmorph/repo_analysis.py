@@ -39,8 +39,12 @@ def analyze_repo_structure(state: dict[str, Any], llm_client: LLMClient | None =
     root = Path(repo_result["path"])
     summary = build_structure_summary(root)
     llm_payload = None
+    llm_errors = []
     if llm_client is not None:
-        llm_payload = llm_client.analyze_repo_structure(summary)
+        try:
+            llm_payload = llm_client.analyze_repo_structure(summary)
+        except Exception as exc:
+            llm_errors.append(str(exc))
 
     return {
         "structure_analysis": {
@@ -48,7 +52,8 @@ def analyze_repo_structure(state: dict[str, Any], llm_client: LLMClient | None =
             "root": str(root),
             "summary": summary,
             "llm": llm_payload or heuristic_structure_analysis(summary),
-            "used_llm": llm_client is not None,
+            "used_llm": llm_payload is not None,
+            "llm_errors": llm_errors,
         }
     }
 

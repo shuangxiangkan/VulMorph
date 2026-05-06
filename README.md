@@ -10,7 +10,7 @@ vulnerability-pattern extraction. The current MVP focuses on the first stages:
 4. Generate or reuse `compile_commands.json` for CMake and supported
    Autotools projects.
 5. Extract functions from the selected source files with CCScope.
-6. Embed extracted functions with a local Jina code embedding model.
+6. Embed extracted functions with a configurable local or API embedding model.
 7. Find historical bug/security-fix commits with LLM batch filtering by default
    and extract native-code patch snippets.
 8. Compare bug-fix snippets with current function embeddings and rank the most
@@ -65,8 +65,9 @@ Python modules:
   automatic CMake and Autotools capture support.
 - `vulmorph/function_extraction.py`: uses CCScope and clangd to extract
   function-like symbols from the selected source scope.
-- `vulmorph/embeddings.py`: embeds extracted functions with the local Jina code
-  embedding model and writes repo-specific JSONL output.
+- `vulmorph/embeddings.py`: embeds extracted functions with a local
+  sentence-transformers model or an OpenAI-compatible embedding API, and writes
+  repo-specific JSONL output.
 - `vulmorph/bug_history_mine.py`: searches git history for bug/security-fix commits
   with LLM batch filtering by default, and extracts native-code diff hunks from
   those commits.
@@ -146,6 +147,13 @@ DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=
 DEEPSEEK_MODEL=
 
+VULMORPH_EMBEDDING_PROVIDER=
+VULMORPH_EMBEDDING_API_KEY=
+VULMORPH_EMBEDDING_BASE_URL=
+VULMORPH_EMBEDDING_MODEL=
+VULMORPH_EMBEDDING_DIMENSIONS=
+VULMORPH_EMBEDDING_TIMEOUT=
+VULMORPH_EMBEDDING_MAX_INPUT_CHARS=
 VULMORPH_EMBEDDING_MODEL_PATH=
 VULMORPH_EMBEDDING_OUTPUT_DIR=
 VULMORPH_EMBEDDING_BATCH_SIZE=
@@ -168,6 +176,36 @@ to run the deterministic heuristic path without model calls.
 The CLI prints per-node progress while running, including periodic embedding
 progress such as `10/250`, and outputs a short text summary at the end. Use
 `--json` to print the full LangGraph state.
+
+Embedding uses `VULMORPH_EMBEDDING_PROVIDER=api` for OpenAI-compatible
+embedding endpoints, or `local` for sentence-transformers models. For Alibaba
+Cloud Model Studio/DashScope compatible mode, use:
+
+```env
+VULMORPH_EMBEDDING_PROVIDER=api
+VULMORPH_EMBEDDING_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+VULMORPH_EMBEDDING_MODEL=text-embedding-v4
+VULMORPH_EMBEDDING_DIMENSIONS=1024
+VULMORPH_EMBEDDING_MAX_INPUT_CHARS=12000
+```
+
+VulMorph trims each function text to `VULMORPH_EMBEDDING_MAX_INPUT_CHARS`
+before API embedding, preserving the beginning and end of the function, so large
+functions do not exceed the provider's per-input token limit.
+
+For OpenAI-compatible Qwen3-Embedding-8B providers, set:
+
+```env
+VULMORPH_EMBEDDING_PROVIDER=api
+VULMORPH_EMBEDDING_BASE_URL=<provider-compatible-base-url>
+VULMORPH_EMBEDDING_MODEL=qwen3-embedding-8b
+VULMORPH_EMBEDDING_DIMENSIONS=
+```
+
+If a provider exposes the model under a namespaced id, such as
+`qwen/qwen3-embedding-8b`, use that exact id instead. API input texts are
+trimmed to `VULMORPH_EMBEDDING_MAX_INPUT_CHARS` before embedding so unusually
+large functions do not exceed provider token limits.
 
 Historical bug-fix commit filtering uses the configured LLM by default and
 processes git log entries in batches. Use `--bug-fix-commit-filter keyword` to
@@ -192,7 +230,10 @@ data/similarity/<repo-name>.bugfix_similarity.json
 
 - `CCScope/` is tracked by the root repository as a Git submodule, so the root
   repository stores only the submodule URL and commit pointer.
-- The local embedding model path is read from `VULMORPH_EMBEDDING_MODEL_PATH`
-  in `.env`, or from `--embedding-model-path`.
+- The embedding provider is read from `VULMORPH_EMBEDDING_PROVIDER` in `.env`,
+  or from `--embedding-provider`. Local mode uses
+  `VULMORPH_EMBEDDING_MODEL_PATH`; API mode uses
+  `VULMORPH_EMBEDDING_API_KEY`, `VULMORPH_EMBEDDING_BASE_URL`, and
+  `VULMORPH_EMBEDDING_MODEL`.
 - `transformers` is pinned below version 5 because the local Jina model depends
   on APIs from the 4.x series.

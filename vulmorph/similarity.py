@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from .embeddings import _load_env_file, _repo_output_name, _required_path_setting
+from .embeddings import _load_env_file, _repo_output_name, embed_texts
 
 
 FALLBACK_OUTPUT_DIR = Path("data/similarity")
@@ -40,16 +40,10 @@ def search_similar_bug_fix_code(state: dict[str, Any]) -> dict[str, Any]:
 
     _load_env_file()
     try:
-        model_path = _required_path_setting(request, "embedding_model_path", "VULMORPH_EMBEDDING_MODEL_PATH")
-        from sentence_transformers import SentenceTransformer
-
-        model = SentenceTransformer(str(model_path), trust_remote_code=True)
-        snippet_vectors = model.encode(
-            [_snippet_text(item) for item in snippets],
-            batch_size=batch_size,
-            show_progress_bar=False,
-            normalize_embeddings=True,
-        )
+        snippet_vectors = []
+        texts = [_snippet_text(item) for item in snippets]
+        for start in range(0, len(texts), batch_size):
+            snippet_vectors.extend(embed_texts(texts[start:start + batch_size], request))
     except Exception as exc:
         return _failure(state, f"bug-fix snippet embedding failed: {exc}")
 

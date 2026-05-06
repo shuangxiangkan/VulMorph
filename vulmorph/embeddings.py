@@ -1,18 +1,22 @@
-"""Local Jina embedding node."""
+"""Function embedding node with local and OpenAI-compatible API providers."""
 
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any
 
 
 FALLBACK_OUTPUT_DIR = Path("data/embeddings")
+DEFAULT_API_TIMEOUT = 120.0
+DEFAULT_API_MAX_INPUT_CHARS = 12000
+_LOCAL_MODELS: dict[str, Any] = {}
 
 
 def embed_functions(state: dict[str, Any]) -> dict[str, Any]:
-    """Embed extracted functions with a local sentence-transformers model."""
+    """Embed extracted functions with the configured embedding provider."""
 
     extraction = state.get("function_extraction", {})
     if not extraction.get("ok"):
@@ -20,14 +24,6 @@ def embed_functions(state: dict[str, Any]) -> dict[str, Any]:
 
     request = dict(state.get("repo_request", {}))
     _load_env_file()
-    try:
-        model_path = _required_path_setting(
-            request,
-            "embedding_model_path",
-            "VULMORPH_EMBEDDING_MODEL_PATH",
-        )
-    except RuntimeError as exc:
-        return _failure(state, str(exc))
     output_dir = _path_setting(
         request,
         "embedding_output_dir",
@@ -44,10 +40,12 @@ def embed_functions(state: dict[str, Any]) -> dict[str, Any]:
     output_path = output_dir / f"{_repo_output_name(state)}.functions.jsonl"
     if not functions:
         output_path.write_text("", encoding="utf-8")
+        config = _embedding_config(request)
         return {
             "embedding_result": {
                 "ok": True,
-                "model_path": str(model_path),
+                "provider": config["provider"],
+                "model": config.get("model"),
                 "output_path": str(output_path),
                 "count": 0,
                 "dimension": 0,
@@ -55,21 +53,6 @@ def embed_functions(state: dict[str, Any]) -> dict[str, Any]:
         }
 
     texts = [_function_text(item) for item in functions]
-    try:
-        from sentence_transformers import SentenceTransformer
-    except ImportError as exc:
-        return _failure(state, "sentence-transformers is required for embedding") | {
-            "embedding_result": {
-                "ok": False,
-                "model_path": str(model_path),
-                "errors": [str(exc)],
-            }
-        }
-
-    try:
-        model = SentenceTransformer(str(model_path), trust_remote_code=True)
-    except Exception as exc:
-        return _failure(state, f"embedding failed: {exc}")
 
     dimension = 0
     progress_callback = state.get("_progress_callback")
@@ -83,12 +66,7 @@ def embed_functions(state: dict[str, Any]) -> dict[str, Any]:
             batch_functions = functions[start:start + current_batch_size]
             batch_texts = texts[start:start + current_batch_size]
             try:
-                vectors = model.encode(
-                    batch_texts,
-                    batch_size=min(current_batch_size, len(batch_texts)),
-                    show_progress_bar=False,
-                    normalize_embeddings=True,
-                )
+                vectors = embed_texts(batch_texts, request)
             except Exception as exc:
                 if current_batch_size == 1:
                     return _failure(state, f"embedding failed at item {start}: {exc}")
@@ -107,8 +85,8 @@ def embed_functions(state: dict[str, Any]) -> dict[str, Any]:
                         },
                     )
                 continue
-            if len(vectors) and dimension == 0:
-                dimension = int(vectors.shape[1])
+            if vectors and dimension == 0:
+                dimension = len(vectors[0])
             for function, vector in zip(batch_functions, vectors):
                 handle.write(
                     json.dumps(
@@ -116,7 +94,7 @@ def embed_functions(state: dict[str, Any]) -> dict[str, Any]:
                             "name": function.get("name"),
                             "file": function.get("file"),
                             "location": function.get("location"),
-                            "embedding": vector.tolist(),
+                            "embedding": vector,
                         },
                         ensure_ascii=False,
                     )
@@ -141,10 +119,12 @@ def embed_functions(state: dict[str, Any]) -> dict[str, Any]:
                     },
                 )
 
+    config = _embedding_config(request)
     return {
         "embedding_result": {
             "ok": True,
-            "model_path": str(model_path),
+            "provider": config["provider"],
+            "model": config.get("model"),
             "output_path": str(output_path),
             "count": len(functions),
             "dimension": dimension,
@@ -152,6 +132,127 @@ def embed_functions(state: dict[str, Any]) -> dict[str, Any]:
             "requested_batch_size": batch_size,
         }
     }
+
+
+def embed_texts(texts: list[str], request: dict[str, Any]) -> list[list[float]]:
+    """Embed text batches using the configured provider."""
+
+    config = _embedding_config(request)
+    if config["provider"] == "api":
+        return _embed_texts_api(texts, config)
+    if config["provider"] == "local":
+        return _embed_texts_local(texts, config)
+    raise RuntimeError(f"unsupported embedding provider: {config['provider']}")
+
+
+def _embed_texts_local(texts: list[str], config: dict[str, Any]) -> list[list[float]]:
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError as exc:
+        raise RuntimeError("sentence-transformers is required for local embedding") from exc
+
+    model_path = str(config["model_path"])
+    model = _LOCAL_MODELS.get(model_path)
+    if model is None:
+        model = SentenceTransformer(model_path, trust_remote_code=True)
+        _LOCAL_MODELS[model_path] = model
+    vectors = model.encode(
+        texts,
+        batch_size=min(int(config["batch_size"]), len(texts)),
+        show_progress_bar=False,
+        normalize_embeddings=True,
+    )
+    return [vector.tolist() for vector in vectors]
+
+
+def _embed_texts_api(texts: list[str], config: dict[str, Any]) -> list[list[float]]:
+    try:
+        import httpx
+    except ImportError as exc:
+        raise RuntimeError("httpx is required for API embedding") from exc
+
+    base_url = str(config["base_url"]).rstrip("/")
+    input_texts = [_fit_api_input(text, int(config["max_input_chars"])) for text in texts]
+    payload: dict[str, Any] = {
+        "model": config["model"],
+        "input": input_texts,
+        "encoding_format": "float",
+    }
+    if config.get("dimensions"):
+        payload["dimensions"] = int(config["dimensions"])
+
+    with httpx.Client(timeout=float(config["timeout"])) as client:
+        response = client.post(
+            f"{base_url}/embeddings",
+            headers={
+                "Authorization": f"Bearer {config['api_key']}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+    if response.status_code >= 400:
+        raise RuntimeError(f"embedding API returned HTTP {response.status_code}: {response.text[:500]}")
+
+    data = response.json()
+    items = data.get("data")
+    if not isinstance(items, list):
+        raise RuntimeError("embedding API response missing data list")
+    items = sorted(items, key=lambda item: item.get("index", 0))
+    vectors = [item.get("embedding") for item in items]
+    if len(vectors) != len(texts) or not all(isinstance(vector, list) for vector in vectors):
+        raise RuntimeError("embedding API response size did not match request size")
+    return _normalize_vectors(vectors)
+
+
+def _embedding_config(request: dict[str, Any]) -> dict[str, Any]:
+    provider = (
+        request.get("embedding_provider")
+        or os.environ.get("VULMORPH_EMBEDDING_PROVIDER")
+        or "local"
+    ).strip().lower()
+    batch_size = max(
+        1,
+        int(request.get("embedding_batch_size") or os.environ.get("VULMORPH_EMBEDDING_BATCH_SIZE", 4)),
+    )
+    if provider == "local":
+        model_path = _required_path_setting(
+            request,
+            "embedding_model_path",
+            "VULMORPH_EMBEDDING_MODEL_PATH",
+        )
+        return {
+            "provider": provider,
+            "model_path": model_path,
+            "model": str(model_path),
+            "batch_size": batch_size,
+        }
+    if provider == "api":
+        return {
+            "provider": provider,
+            "api_key": _required_string_setting(
+                request,
+                "embedding_api_key",
+                "VULMORPH_EMBEDDING_API_KEY",
+            ),
+            "base_url": _required_string_setting(
+                request,
+                "embedding_base_url",
+                "VULMORPH_EMBEDDING_BASE_URL",
+            ),
+            "model": _required_string_setting(
+                request,
+                "embedding_model",
+                "VULMORPH_EMBEDDING_MODEL",
+            ),
+            "dimensions": request.get("embedding_dimensions") or os.environ.get("VULMORPH_EMBEDDING_DIMENSIONS", ""),
+            "timeout": request.get("embedding_timeout") or os.environ.get("VULMORPH_EMBEDDING_TIMEOUT", DEFAULT_API_TIMEOUT),
+            "max_input_chars": (
+                request.get("embedding_max_input_chars")
+                or os.environ.get("VULMORPH_EMBEDDING_MAX_INPUT_CHARS", DEFAULT_API_MAX_INPUT_CHARS)
+            ),
+            "batch_size": batch_size,
+        }
+    raise RuntimeError("VULMORPH_EMBEDDING_PROVIDER must be 'local' or 'api'")
 
 
 def _function_text(item: dict[str, Any]) -> str:
@@ -186,6 +287,44 @@ def _required_path_setting(
     if not value:
         raise RuntimeError(f"{env_key} must be set in .env or passed as {request_key}")
     return Path(value)
+
+
+def _required_string_setting(
+    request: dict[str, Any],
+    request_key: str,
+    env_key: str,
+) -> str:
+    value = request.get(request_key) or os.environ.get(env_key)
+    if not value:
+        raise RuntimeError(f"{env_key} must be set in .env or passed as {request_key}")
+    return str(value)
+
+
+def _normalize_vectors(vectors: list[list[float]]) -> list[list[float]]:
+    normalized = []
+    for vector in vectors:
+        numeric = [float(value) for value in vector]
+        norm = math.sqrt(sum(value * value for value in numeric))
+        if norm:
+            numeric = [value / norm for value in numeric]
+        normalized.append(numeric)
+    return normalized
+
+
+def _fit_api_input(text: str, max_chars: int) -> str:
+    text = text.strip()
+    if not text:
+        return "(empty)"
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+
+    marker = "\n\n/* ... truncated for embedding API input limit ... */\n\n"
+    if max_chars <= len(marker) + 2:
+        return text[:max_chars]
+    budget = max_chars - len(marker)
+    head_chars = max(1, budget * 2 // 3)
+    tail_chars = max(1, budget - head_chars)
+    return text[:head_chars].rstrip() + marker + text[-tail_chars:].lstrip()
 
 
 def _repo_output_name(state: dict[str, Any]) -> str:
