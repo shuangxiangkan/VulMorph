@@ -34,7 +34,10 @@ def embed_functions(state: dict[str, Any]) -> dict[str, Any]:
         "VULMORPH_EMBEDDING_OUTPUT_DIR",
         FALLBACK_OUTPUT_DIR,
     )
-    batch_size = max(1, int(request.get("embedding_batch_size") or os.environ.get("VULMORPH_EMBEDDING_BATCH_SIZE", 4)))
+    batch_size = max(
+        1,
+        int(request.get("embedding_batch_size") or os.environ.get("VULMORPH_EMBEDDING_BATCH_SIZE", 4)),
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
 
     functions = extraction.get("functions", [])
@@ -72,19 +75,38 @@ def embed_functions(state: dict[str, Any]) -> dict[str, Any]:
     progress_callback = state.get("_progress_callback")
     progress_step = max(10, batch_size)
     last_reported = 0
+    current_batch_size = batch_size
+    min_batch_size_used = batch_size
     with output_path.open("w", encoding="utf-8") as handle:
-        for start in range(0, len(functions), batch_size):
-            batch_functions = functions[start:start + batch_size]
-            batch_texts = texts[start:start + batch_size]
+        start = 0
+        while start < len(functions):
+            batch_functions = functions[start:start + current_batch_size]
+            batch_texts = texts[start:start + current_batch_size]
             try:
                 vectors = model.encode(
                     batch_texts,
-                    batch_size=batch_size,
+                    batch_size=min(current_batch_size, len(batch_texts)),
                     show_progress_bar=False,
                     normalize_embeddings=True,
                 )
             except Exception as exc:
-                return _failure(state, f"embedding failed at batch {start // batch_size}: {exc}")
+                if current_batch_size == 1:
+                    return _failure(state, f"embedding failed at item {start}: {exc}")
+                current_batch_size = max(1, current_batch_size // 2)
+                min_batch_size_used = min(min_batch_size_used, current_batch_size)
+                if callable(progress_callback):
+                    progress_callback(
+                        "embed_functions",
+                        "progress",
+                        {
+                            "embedding_progress": {
+                                "completed": start,
+                                "total": len(functions),
+                                "output_path": str(output_path),
+                            }
+                        },
+                    )
+                continue
             if len(vectors) and dimension == 0:
                 dimension = int(vectors.shape[1])
             for function, vector in zip(batch_functions, vectors):
@@ -100,7 +122,8 @@ def embed_functions(state: dict[str, Any]) -> dict[str, Any]:
                     )
                     + "\n"
                 )
-            completed = min(start + len(batch_functions), len(functions))
+            start += len(batch_functions)
+            completed = min(start, len(functions))
             if (
                 callable(progress_callback)
                 and (completed == len(functions) or completed - last_reported >= progress_step)
@@ -125,7 +148,8 @@ def embed_functions(state: dict[str, Any]) -> dict[str, Any]:
             "output_path": str(output_path),
             "count": len(functions),
             "dimension": dimension,
-            "batch_size": batch_size,
+            "batch_size": min_batch_size_used,
+            "requested_batch_size": batch_size,
         }
     }
 

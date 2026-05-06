@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import json
 import subprocess
@@ -85,6 +86,7 @@ def _prepare_cmake(root: Path, compile_commands: Path, state: dict[str, Any]) ->
 
 def _prepare_autotools(root: Path, compile_commands: Path, state: dict[str, Any]) -> dict[str, Any]:
     capture_tool = _capture_tool()
+    env = _autotools_env()
     if capture_tool is None:
         return _failure(
             state,
@@ -92,7 +94,7 @@ def _prepare_autotools(root: Path, compile_commands: Path, state: dict[str, Any]
             "Install bear or clang-tools to generate compile_commands.json.",
         )
 
-    bootstrap = _run_autotools_bootstrap(root)
+    bootstrap = _run_autotools_bootstrap(root, env=env)
     if bootstrap["returncode"] != 0:
         return _failure(state, bootstrap["stderr"] or bootstrap["stdout"] or "Autotools bootstrap failed")
 
@@ -102,6 +104,7 @@ def _prepare_autotools(root: Path, compile_commands: Path, state: dict[str, Any]
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
     if configure.returncode != 0:
         return _failure(state, configure.stderr.strip() or configure.stdout.strip() or "./configure failed")
@@ -116,6 +119,7 @@ def _prepare_autotools(root: Path, compile_commands: Path, state: dict[str, Any]
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
     if build.returncode != 0 and not compile_commands.exists():
         return _failure(state, build.stderr.strip() or build.stdout.strip() or "captured make failed")
@@ -141,11 +145,11 @@ def _capture_tool() -> str | None:
     return None
 
 
-def _run_autotools_bootstrap(root: Path) -> dict[str, Any]:
-    if (root / "configure").exists():
-        return {"returncode": 0, "stdout": "", "stderr": ""}
+def _run_autotools_bootstrap(root: Path, env: dict[str, str] | None = None) -> dict[str, Any]:
     if (root / "autogen.sh").exists():
         command = ["sh", "autogen.sh"]
+    elif (root / "configure").exists() and not _missing_autotools_aux_files(root):
+        return {"returncode": 0, "stdout": "", "stderr": ""}
     elif shutil.which("autoreconf"):
         command = ["autoreconf", "-fi"]
     else:
@@ -154,8 +158,33 @@ def _run_autotools_bootstrap(root: Path) -> dict[str, Any]:
             "stdout": "",
             "stderr": "Autotools project detected, but configure is missing and neither autogen.sh nor autoreconf is available.",
         }
-    result = subprocess.run(command, cwd=root, capture_output=True, text=True, check=False)
+    result = subprocess.run(command, cwd=root, capture_output=True, text=True, check=False, env=env)
     return {"returncode": result.returncode, "stdout": result.stdout.strip(), "stderr": result.stderr.strip()}
+
+
+def _missing_autotools_aux_files(root: Path) -> list[str]:
+    aux_dirs = [root, root / "build-aux"]
+    required_names = ("config.guess", "config.sub", "missing", "install-sh")
+    optional_names = ("ar-lib", "compile")
+
+    missing: list[str] = []
+    for name in required_names:
+        if not any((directory / name).exists() for directory in aux_dirs):
+            missing.append(name)
+
+    if not any((directory / name).exists() for directory in aux_dirs for name in optional_names):
+        missing.extend(optional_names)
+
+    return missing
+
+
+def _autotools_env() -> dict[str, str]:
+    env = dict(os.environ)
+    if shutil.which("libtoolize") is None and shutil.which("glibtoolize"):
+        env.setdefault("LIBTOOLIZE", "glibtoolize")
+    if shutil.which("glibtool"):
+        env.setdefault("LIBTOOL", "glibtool")
+    return env
 
 
 def _normalize_compile_commands(path: Path) -> None:

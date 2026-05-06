@@ -97,6 +97,9 @@ The script installs the required system dependencies:
 
 - `cmake`
 - `clangd`
+- `autoconf`
+- `automake`
+- `libtool`
 - `bear` or `intercept-build`
 
 Clone with submodules after the system dependencies are ready:

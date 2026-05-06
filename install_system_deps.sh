@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-REQUIRED_COMMANDS=(cmake clangd)
+REQUIRED_COMMANDS=(cmake clangd autoreconf aclocal)
 CAPTURE_TOOLS=(bear intercept-build)
 
 log() {
@@ -49,8 +49,15 @@ has_capture_tool() {
   return 1
 }
 
+has_libtool_bootstrap_tool() {
+  have_command libtoolize || have_command glibtoolize
+}
+
 all_missing_requirements() {
   missing_commands
+  if ! has_libtool_bootstrap_tool; then
+    printf '%s\n' "libtoolize/glibtoolize"
+  fi
   if ! has_capture_tool; then
     printf '%s\n' "bear/intercept-build"
   fi
@@ -103,6 +110,10 @@ choose_linux_package() {
       case "$command_name" in
         cmake) echo "cmake" ;;
         clangd) choose_apt_package clangd clangd-18 clangd-17 clangd-16 ;;
+        autoreconf) echo "autoconf" ;;
+        aclocal) echo "automake" ;;
+        libtoolize) echo "libtool" ;;
+        glibtoolize) echo "libtool" ;;
         bear) echo "bear" ;;
         intercept-build) choose_apt_package clang-tools clang-tools-18 clang-tools-17 clang-tools-16 ;;
       esac
@@ -111,6 +122,9 @@ choose_linux_package() {
       case "$command_name" in
         cmake) echo "cmake" ;;
         clangd) echo "clang-tools-extra" ;;
+        autoreconf) echo "autoconf" ;;
+        aclocal) echo "automake" ;;
+        libtoolize|glibtoolize) echo "libtool" ;;
         bear) echo "bear" ;;
         intercept-build) echo "clang-tools-extra" ;;
       esac
@@ -119,6 +133,9 @@ choose_linux_package() {
       case "$command_name" in
         cmake) echo "cmake" ;;
         clangd) echo "clang" ;;
+        autoreconf) echo "autoconf" ;;
+        aclocal) echo "automake" ;;
+        libtoolize|glibtoolize) echo "libtool" ;;
         bear) echo "bear" ;;
         intercept-build) echo "clang" ;;
       esac
@@ -127,6 +144,9 @@ choose_linux_package() {
       case "$command_name" in
         cmake) echo "cmake" ;;
         clangd) echo "clang-tools" ;;
+        autoreconf) echo "autoconf" ;;
+        aclocal) echo "automake" ;;
+        libtoolize|glibtoolize) echo "libtool" ;;
         bear) echo "bear" ;;
         intercept-build) echo "clang-tools" ;;
       esac
@@ -158,12 +178,28 @@ install_with_brew() {
           packages+=("llvm")
         fi
         ;;
+      autoreconf)
+        if ! array_contains "autoconf" "${packages[@]-}"; then
+          packages+=("autoconf")
+        fi
+        ;;
+      aclocal)
+        if ! array_contains "automake" "${packages[@]-}"; then
+          packages+=("automake")
+        fi
+        ;;
     esac
   done
 
   if ! has_capture_tool; then
     if ! array_contains "bear" "${packages[@]-}"; then
       packages+=("bear")
+    fi
+  fi
+
+  if ! has_libtool_bootstrap_tool; then
+    if ! array_contains "libtool" "${packages[@]-}"; then
+      packages+=("libtool")
     fi
   fi
 
@@ -205,6 +241,17 @@ install_with_linux_manager() {
     fi
     if [[ -z "$package_name" ]]; then
       log "No package mapping found for capture tools with package manager '$manager'."
+      exit 1
+    fi
+    if ! array_contains "$package_name" "${packages[@]-}"; then
+      packages+=("$package_name")
+    fi
+  fi
+
+  if ! has_libtool_bootstrap_tool; then
+    package_name="$(choose_linux_package "$manager" "libtoolize" || true)"
+    if [[ -z "$package_name" ]]; then
+      log "No package mapping found for libtool bootstrap tools with package manager '$manager'."
       exit 1
     fi
     if ! array_contains "$package_name" "${packages[@]-}"; then
@@ -270,7 +317,7 @@ main() {
 
   echo
   if [[ ${#missing_after[@]} -eq 0 ]]; then
-    log "All required system dependencies are available: ${REQUIRED_COMMANDS[*]} and bear/intercept-build"
+    log "All required system dependencies are available: ${REQUIRED_COMMANDS[*]}, libtoolize/glibtoolize, and bear/intercept-build"
   else
     log "Some commands are still missing: ${missing_after[*]}"
     log "You may need to add toolchain binaries to PATH or install distro-specific packages."
